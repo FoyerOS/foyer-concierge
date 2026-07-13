@@ -1,0 +1,17 @@
+[Unit]
+Description=Foyer OS management daemon
+Documentation=https://github.com/FoyerOS/foyer-concierge
+After=network.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/concierge daemon
+Restart=on-failure
+RestartSec=2
+# Needs root: PAM auth, user management, systemd + storage control.
+# Tighten with systemd sandboxing options as features land.
+RuntimeDirectory=foyer
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

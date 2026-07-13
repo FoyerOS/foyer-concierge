@@ -1,0 +1,50 @@
+[package]
+name = "concierge"
+description = "Foyer OS management daemon and CLI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# Embed the built WebGUI (webgui/dist) into the binary. Requires
+# `npm run build` in webgui/ first; see README.
+webgui = ["dep:rust-embed", "dep:mime_guess"]
+
+[dependencies]
+concierge-api.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+utoipa.workspace = true
+
+anyhow = "1"
+thiserror = "2"
+async-trait = "0.1"
+
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.7", features = ["trace"] }
+tower-sessions = "0.15"
+
+clap = { version = "4", features = ["derive", "env"] }
+toml = "1"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-journald = "0.3"
+
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+sd-notify = "0.5"
+pam-client = "0.5"
+nix = { version = "0.31", features = ["user", "hostname"] }
+
+# CLI-side HTTP client over the unix socket
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+hyperlocal = "0.9"
+http-body-util = "0.1"
+
+rust-embed = { version = "8", optional = true }
+mime_guess = { version = "2", optional = true }

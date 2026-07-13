@@ -1,1 +1,4 @@
 /target
+/webgui/node_modules
+/webgui/dist
+/webgui/tsconfig.tsbuildinfo

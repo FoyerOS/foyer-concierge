@@ -1,0 +1,11 @@
+[package]
+name = "concierge-api"
+description = "Shared API types for foyer-concierge (DTOs, error envelope, API version)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+utoipa.workspace = true
