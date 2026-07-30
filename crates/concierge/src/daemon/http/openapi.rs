@@ -14,6 +14,10 @@ use super::handlers;
         handlers::system_status,
         handlers::list_users,
         handlers::list_services,
+        handlers::enable_service,
+        handlers::disable_service,
+        handlers::get_service_config,
+        handlers::update_service_config,
         handlers::list_disks,
     )
 )]

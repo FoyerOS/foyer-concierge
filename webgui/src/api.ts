@@ -19,6 +19,32 @@ export interface SystemStatus {
   systemd_version: string | null;
 }
 
+export type ServiceHealth =
+  | "ok"
+  | "failed"
+  | "transitioning"
+  | "inactive"
+  | "unknown";
+
+export interface ServiceInfo {
+  name: string;
+  description: string;
+  load_state: string;
+  active_state: string;
+  sub_state: string;
+  unit_file_state: string | null;
+  enabled: boolean;
+  active: boolean;
+  health: ServiceHealth;
+  config_paths: string[];
+}
+
+export interface ServiceConfigFile {
+  path: string;
+  content: string;
+  etag: string;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -52,4 +78,22 @@ export const api = {
   logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),
   session: () => request<SessionInfo>("/api/v1/auth/session"),
   systemStatus: () => request<SystemStatus>("/api/v1/system/status"),
+  listServices: () => request<ServiceInfo[]>("/api/v1/services"),
+  enableService: (name: string) =>
+    request<ServiceInfo>(`/api/v1/services/${encodeURIComponent(name)}/enable`, {
+      method: "POST",
+    }),
+  disableService: (name: string) =>
+    request<ServiceInfo>(`/api/v1/services/${encodeURIComponent(name)}/disable`, {
+      method: "POST",
+    }),
+  getServiceConfig: (name: string, path: string) =>
+    request<ServiceConfigFile>(
+      `/api/v1/services/${encodeURIComponent(name)}/config?path=${encodeURIComponent(path)}`,
+    ),
+  updateServiceConfig: (name: string, path: string, content: string, etag: string) =>
+    request<ServiceConfigFile>(
+      `/api/v1/services/${encodeURIComponent(name)}/config?path=${encodeURIComponent(path)}`,
+      { method: "PUT", body: JSON.stringify({ content, etag }) },
+    ),
 };

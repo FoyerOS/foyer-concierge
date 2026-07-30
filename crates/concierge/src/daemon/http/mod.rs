@@ -26,6 +26,12 @@ fn router(state: AppState) -> Router {
         .route("/system/status", get(handlers::system_status))
         .route("/users", get(handlers::list_users))
         .route("/services", get(handlers::list_services))
+        .route("/services/{name}/enable", post(handlers::enable_service))
+        .route("/services/{name}/disable", post(handlers::disable_service))
+        .route(
+            "/services/{name}/config",
+            get(handlers::get_service_config).put(handlers::update_service_config),
+        )
         .route("/storage/disks", get(handlers::list_disks))
         .route_layer(middleware::from_fn(session::require_auth));
 

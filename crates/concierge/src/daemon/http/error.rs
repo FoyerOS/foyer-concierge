@@ -11,6 +11,8 @@ pub enum ApiError {
     Unauthorized(&'static str),
     Forbidden,
     Unimplemented,
+    NotFound(String),
+    Conflict(String),
     Internal(anyhow::Error),
 }
 
@@ -30,6 +32,8 @@ impl IntoResponse for ApiError {
                 "unimplemented",
                 "not implemented yet".to_owned(),
             ),
+            Self::NotFound(message) => (StatusCode::NOT_FOUND, "not_found", message),
+            Self::Conflict(message) => (StatusCode::CONFLICT, "conflict", message),
             Self::Internal(error) => {
                 tracing::error!(error = %format!("{error:#}"), "internal error");
                 (
@@ -51,6 +55,8 @@ impl From<ServiceError> for ApiError {
     fn from(error: ServiceError) -> Self {
         match error {
             ServiceError::Unimplemented => Self::Unimplemented,
+            ServiceError::NotFound(message) => Self::NotFound(message),
+            ServiceError::Conflict(message) => Self::Conflict(message),
             ServiceError::Other(error) => Self::Internal(error),
         }
     }

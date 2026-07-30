@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type SessionInfo, type SystemStatus } from "./api.ts";
+import Services from "./Services.tsx";
+import ServiceConfig from "./ServiceConfig.tsx";
 
 export default function App() {
   const [session, setSession] = useState<SessionInfo | null | undefined>();
@@ -78,6 +80,11 @@ function Login({ onLogin }: { onLogin: (session: SessionInfo) => void }) {
   );
 }
 
+type View =
+  | { kind: "status" }
+  | { kind: "services" }
+  | { kind: "config"; unit: string; path: string };
+
 function Dashboard({
   session,
   onLogout,
@@ -85,6 +92,55 @@ function Dashboard({
   session: SessionInfo;
   onLogout: () => void;
 }) {
+  const [view, setView] = useState<View>({ kind: "status" });
+
+  return (
+    <main className="card">
+      <header>
+        <h1>Foyer Concierge</h1>
+        <span>
+          {session.username} · <button onClick={onLogout}>Sign out</button>
+        </span>
+      </header>
+      <nav>
+        <a
+          href="#"
+          onClick={(event) => {
+            event.preventDefault();
+            setView({ kind: "status" });
+          }}
+        >
+          Status
+        </a>{" "}
+        ·{" "}
+        <a
+          href="#"
+          onClick={(event) => {
+            event.preventDefault();
+            setView({ kind: "services" });
+          }}
+        >
+          Services
+        </a>
+      </nav>
+      {view.kind === "status" && <StatusView />}
+      {view.kind === "services" && (
+        <Services
+          onConfigure={(unit, path) => setView({ kind: "config", unit, path })}
+        />
+      )}
+      {view.kind === "config" && (
+        <ServiceConfig
+          unit={view.unit}
+          path={view.path}
+          onBack={() => setView({ kind: "services" })}
+        />
+      )}
+    </main>
+  );
+}
+
+function StatusView() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,13 +154,7 @@ function Dashboard({
   }, []);
 
   return (
-    <main className="card">
-      <header>
-        <h1>Foyer Concierge</h1>
-        <span>
-          {session.username} · <button onClick={onLogout}>Sign out</button>
-        </span>
-      </header>
+    <section>
       <h2>System status</h2>
       {error && <p className="error">{error}</p>}
       {status ? (
@@ -126,7 +176,7 @@ function Dashboard({
       ) : (
         !error && <p>Loading…</p>
       )}
-    </main>
+    </section>
   );
 }
 

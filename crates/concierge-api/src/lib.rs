@@ -69,9 +69,53 @@ pub struct UserInfo {
 /// A managed service (systemd unit, possibly podman/Quadlet-backed).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServiceInfo {
+    /// Full systemd unit name, e.g. "foyer-concierge.service".
     pub name: String,
+    pub description: String,
+    /// systemd LoadState: "loaded", "not-found", "masked", ...
+    pub load_state: String,
+    /// systemd ActiveState: "active", "inactive", "failed", "activating", "deactivating".
+    pub active_state: String,
+    /// systemd SubState: "running", "dead", "exited", "failed", ...
+    pub sub_state: String,
+    /// Raw `GetUnitFileState` result ("enabled", "disabled", "static", "masked", ...);
+    /// `None` if systemd couldn't report one.
+    pub unit_file_state: Option<String>,
+    /// Convenience: true iff `unit_file_state` starts with "enabled".
     pub enabled: bool,
+    /// Convenience: true iff `active_state == "active"`.
     pub active: bool,
+    /// Coarse status for a UI badge, derived server-side from `active_state`.
+    pub health: ServiceHealth,
+    /// Config files mapped to this unit (see the managed-service registry); empty if none.
+    pub config_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceHealth {
+    Ok,
+    Failed,
+    Transitioning,
+    Inactive,
+    Unknown,
+}
+
+/// A config file mapped to a managed service.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ServiceConfigFile {
+    /// Absolute path on disk, for display only.
+    pub path: String,
+    pub content: String,
+    /// Change-detection token (hash of `content`); an update must echo it back.
+    pub etag: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct UpdateServiceConfigRequest {
+    pub content: String,
+    /// Must match the current file's `etag`, else 409 Conflict.
+    pub etag: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

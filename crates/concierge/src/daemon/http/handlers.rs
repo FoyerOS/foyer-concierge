@@ -1,9 +1,10 @@
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Path, Query, State};
 use concierge_api::{
-    ApiErrorBody, DiskInfo, HealthResponse, HealthStatus, LoginRequest, ServiceInfo, SessionInfo,
-    SystemStatus, UserInfo,
+    ApiErrorBody, DiskInfo, HealthResponse, HealthStatus, LoginRequest, ServiceConfigFile,
+    ServiceInfo, SessionInfo, SystemStatus, UpdateServiceConfigRequest, UserInfo,
 };
+use serde::Deserialize;
 use tower_sessions::Session;
 
 use super::error::ApiError;
@@ -92,6 +93,74 @@ pub async fn list_users(State(state): State<AppState>) -> ApiResult<Vec<UserInfo
 ))]
 pub async fn list_services(State(state): State<AppState>) -> ApiResult<Vec<ServiceInfo>> {
     Ok(Json(state.units.list().await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/services/{name}/enable", params(
+    ("name" = String, Path, description = "systemd unit name"),
+), responses(
+    (status = 200, body = ServiceInfo),
+    (status = 404, body = ApiErrorBody),
+))]
+pub async fn enable_service(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<ServiceInfo> {
+    Ok(Json(state.units.enable(&name).await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/services/{name}/disable", params(
+    ("name" = String, Path, description = "systemd unit name"),
+), responses(
+    (status = 200, body = ServiceInfo),
+    (status = 404, body = ApiErrorBody),
+))]
+pub async fn disable_service(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<ServiceInfo> {
+    Ok(Json(state.units.disable(&name).await?))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConfigPathQuery {
+    pub path: String,
+}
+
+#[utoipa::path(get, path = "/api/v1/services/{name}/config", params(
+    ("name" = String, Path, description = "systemd unit name"),
+    ("path" = String, Query, description = "config file path, from ServiceInfo.config_paths"),
+), responses(
+    (status = 200, body = ServiceConfigFile),
+    (status = 404, body = ApiErrorBody),
+))]
+pub async fn get_service_config(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Query(query): Query<ConfigPathQuery>,
+) -> ApiResult<ServiceConfigFile> {
+    Ok(Json(state.units.get_config(&name, &query.path).await?))
+}
+
+#[utoipa::path(put, path = "/api/v1/services/{name}/config", params(
+    ("name" = String, Path, description = "systemd unit name"),
+    ("path" = String, Query, description = "config file path, from ServiceInfo.config_paths"),
+), request_body = UpdateServiceConfigRequest, responses(
+    (status = 200, body = ServiceConfigFile),
+    (status = 404, body = ApiErrorBody),
+    (status = 409, body = ApiErrorBody),
+))]
+pub async fn update_service_config(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Query(query): Query<ConfigPathQuery>,
+    Json(request): Json<UpdateServiceConfigRequest>,
+) -> ApiResult<ServiceConfigFile> {
+    Ok(Json(
+        state
+            .units
+            .set_config(&name, &query.path, request.content, &request.etag)
+            .await?,
+    ))
 }
 
 #[utoipa::path(get, path = "/api/v1/storage/disks", responses(
