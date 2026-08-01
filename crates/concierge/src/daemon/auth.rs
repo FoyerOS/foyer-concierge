@@ -4,7 +4,7 @@ use std::ffi::CString;
 
 use anyhow::Context;
 use pam_client::conv_mock::Conversation;
-use pam_client::{Context as PamContext, Flag};
+use pam_client::{Context as PamContext, ErrorCode, Flag};
 
 use super::config::Config;
 
@@ -14,6 +14,8 @@ pub enum AuthError {
     InvalidCredentials,
     #[error("user is not allowed to manage this system")]
     NotAuthorized,
+    #[error("password change required before login")]
+    PasswordChangeRequired,
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -44,13 +46,23 @@ fn pam_authenticate(service: &str, username: &str, password: &str) -> Result<(),
     )
     .context("cannot initialize PAM")?;
 
-    // Treat all failures the same to prevent user enumeration.
-    let result = context
-        .authenticate(Flag::NONE)
-        .and_then(|()| context.acct_mgmt(Flag::NONE));
-    result.map_err(|error| {
+    // Treat authentication failures uniformly to prevent user enumeration.
+    context.authenticate(Flag::NONE).map_err(|error| {
         tracing::info!(username, %error, "PAM rejected login");
         AuthError::InvalidCredentials
+    })?;
+
+    // A fresh admin account (see foyer-base-users) has its password aged out
+    // so pam_unix forces a change; the credentials themselves were correct,
+    // so this must stay distinguishable from InvalidCredentials or the caller
+    // has no way to route the user to a change-password flow.
+    context.acct_mgmt(Flag::NONE).map_err(|error| {
+        if error.code() == ErrorCode::NEW_AUTHTOK_REQD {
+            AuthError::PasswordChangeRequired
+        } else {
+            tracing::info!(username, %error, "PAM rejected login");
+            AuthError::InvalidCredentials
+        }
     })
 }
 

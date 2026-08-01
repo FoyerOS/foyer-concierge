@@ -10,6 +10,7 @@ use crate::daemon::services::ServiceError;
 pub enum ApiError {
     Unauthorized(&'static str),
     Forbidden,
+    PasswordChangeRequired,
     Unimplemented,
     NotFound(String),
     Conflict(String),
@@ -26,6 +27,11 @@ impl IntoResponse for ApiError {
                 StatusCode::FORBIDDEN,
                 "forbidden",
                 "not allowed".to_owned(),
+            ),
+            Self::PasswordChangeRequired => (
+                StatusCode::FORBIDDEN,
+                "password_change_required",
+                "password change required before login".to_owned(),
             ),
             Self::Unimplemented => (
                 StatusCode::NOT_IMPLEMENTED,
@@ -67,6 +73,7 @@ impl From<AuthError> for ApiError {
         match error {
             AuthError::InvalidCredentials => Self::Unauthorized("invalid username or password"),
             AuthError::NotAuthorized => Self::Forbidden,
+            AuthError::PasswordChangeRequired => Self::PasswordChangeRequired,
             AuthError::Internal(error) => Self::Internal(error),
         }
     }
