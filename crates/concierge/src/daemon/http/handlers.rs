@@ -1,9 +1,9 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use concierge_api::{
-    ApiErrorBody, DiskInfo, EnableTlsRequest, HealthResponse, HealthStatus, LoginRequest,
-    ServiceConfigFile, ServiceInfo, SessionInfo, SetCaRequest, SystemStatus, TlsStatus,
-    UpdateServiceConfigRequest, UserInfo,
+    ApiErrorBody, ChangePasswordRequest, DiskInfo, EnableTlsRequest, HealthResponse, HealthStatus,
+    LoginRequest, ServiceConfigFile, ServiceInfo, SessionInfo, SetCaRequest, SystemStatus,
+    TlsStatus, UpdateServiceConfigRequest, UserInfo,
 };
 use serde::Deserialize;
 use tower_sessions::Session;
@@ -35,18 +35,46 @@ pub async fn login(
     Json(request): Json<LoginRequest>,
 ) -> ApiResult<SessionInfo> {
     auth::login(&state.config, &request.username, &request.password).await?;
-    // Cycle session ID on privilege change.
+    Ok(Json(establish_session(&session, request.username).await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/auth/change-password", request_body = ChangePasswordRequest, responses(
+    (status = 200, body = SessionInfo),
+    (status = 400, body = ApiErrorBody),
+    (status = 401, body = ApiErrorBody),
+    (status = 403, body = ApiErrorBody),
+))]
+pub async fn change_password(
+    State(state): State<AppState>,
+    session: Session,
+    Json(request): Json<ChangePasswordRequest>,
+) -> ApiResult<SessionInfo> {
+    auth::change_expired_password(
+        &state.config,
+        &request.username,
+        &request.current_password,
+        &request.new_password,
+    )
+    .await?;
+    // Re-validate with the new password (also re-checks admin-group
+    // membership) rather than trusting chauthtok succeeding implies login
+    // would too.
+    auth::login(&state.config, &request.username, &request.new_password).await?;
+    Ok(Json(establish_session(&session, request.username).await?))
+}
+
+/// Cycle the session ID (mitigates session fixation on a privilege change)
+/// and record the now-authenticated username.
+async fn establish_session(session: &Session, username: String) -> Result<SessionInfo, ApiError> {
     session
         .cycle_id()
         .await
         .map_err(|error| ApiError::Internal(error.into()))?;
     session
-        .insert(SESSION_USERNAME_KEY, request.username.clone())
+        .insert(SESSION_USERNAME_KEY, username.clone())
         .await
         .map_err(|error| ApiError::Internal(error.into()))?;
-    Ok(Json(SessionInfo {
-        username: request.username,
-    }))
+    Ok(SessionInfo { username })
 }
 
 #[utoipa::path(post, path = "/api/v1/auth/logout", responses((status = 204)))]

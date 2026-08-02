@@ -1,10 +1,10 @@
 //! PAM-backed login with an admin-group authorization check.
 
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 
 use anyhow::Context;
 use pam_client::conv_mock::Conversation;
-use pam_client::{Context as PamContext, ErrorCode, Flag};
+use pam_client::{Context as PamContext, ConversationHandler, ErrorCode, Flag};
 
 use super::config::Config;
 
@@ -16,6 +16,8 @@ pub enum AuthError {
     NotAuthorized,
     #[error("password change required before login")]
     PasswordChangeRequired,
+    #[error("new password rejected: {0}")]
+    PasswordRejected(String),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -64,6 +66,97 @@ fn pam_authenticate(service: &str, username: &str, password: &str) -> Result<(),
             AuthError::InvalidCredentials
         }
     })
+}
+
+/// Authenticate with the current password, then use PAM's `chauthtok` to set
+/// a new one (blocking). Used to clear a forced/expired password (see
+/// foyer-base-users) from an unauthenticated context, since the caller can't
+/// have a session yet if their password is expired.
+pub async fn change_expired_password(
+    config: &Config,
+    username: &str,
+    current_password: &str,
+    new_password: &str,
+) -> Result<(), AuthError> {
+    let pam_service = config.pam_service.clone();
+    let username = username.to_owned();
+    let current_password = current_password.to_owned();
+    let new_password = new_password.to_owned();
+
+    tokio::task::spawn_blocking(move || {
+        pam_change_password(&pam_service, &username, &current_password, &new_password)
+    })
+    .await
+    .map_err(|join_error| anyhow::anyhow!(join_error))?
+}
+
+fn pam_change_password(
+    service: &str,
+    username: &str,
+    current_password: &str,
+    new_password: &str,
+) -> Result<(), AuthError> {
+    let mut context = PamContext::new(
+        service,
+        Some(username),
+        ChangePasswordConversation {
+            current_password: current_password.to_owned(),
+            new_password: new_password.to_owned(),
+        },
+    )
+    .context("cannot initialize PAM")?;
+
+    // Treat authentication failures uniformly to prevent user enumeration.
+    context.authenticate(Flag::NONE).map_err(|error| {
+        tracing::info!(username, %error, "PAM rejected current password");
+        AuthError::InvalidCredentials
+    })?;
+
+    // Not every account reaching this endpoint is necessarily expired (e.g. a
+    // retry after an earlier failed attempt already cleared it); either way
+    // chauthtok below is what actually matters.
+    let _ = context.acct_mgmt(Flag::NONE);
+
+    context.chauthtok(Flag::CHANGE_EXPIRED_AUTHTOK).map_err(|error| {
+        tracing::info!(username, %error, "PAM rejected new password");
+        AuthError::PasswordRejected(error.to_string())
+    })
+}
+
+/// Answers a PAM `chauthtok()` conversation with two known passwords:
+/// prompts mentioning "current"/"old" get the current password, everything
+/// else (the "New password"/"Retype new password" prompts pam_unix and
+/// pam_cracklib issue) gets the new password.
+///
+/// `conv_mock::Conversation` (used for plain `authenticate()` above) can't be
+/// reused here since it always echoes back a single fixed password.
+struct ChangePasswordConversation {
+    current_password: String,
+    new_password: String,
+}
+
+impl ConversationHandler for ChangePasswordConversation {
+    fn prompt_echo_on(&mut self, _prompt: &CStr) -> Result<CString, ErrorCode> {
+        Err(ErrorCode::CONV_ERR)
+    }
+
+    fn prompt_echo_off(&mut self, prompt: &CStr) -> Result<CString, ErrorCode> {
+        let prompt = prompt.to_string_lossy().to_lowercase();
+        let answer = if prompt.contains("current") || prompt.contains("old") {
+            &self.current_password
+        } else {
+            &self.new_password
+        };
+        CString::new(answer.as_str()).map_err(|_| ErrorCode::CONV_ERR)
+    }
+
+    fn text_info(&mut self, msg: &CStr) {
+        tracing::debug!(msg = %msg.to_string_lossy(), "PAM info");
+    }
+
+    fn error_msg(&mut self, msg: &CStr) {
+        tracing::debug!(msg = %msg.to_string_lossy(), "PAM error");
+    }
 }
 
 fn is_group_member(username: &str, group_name: &str) -> Result<bool, AuthError> {

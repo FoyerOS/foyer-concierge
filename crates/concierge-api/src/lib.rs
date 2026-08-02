@@ -60,6 +60,13 @@ pub struct SessionInfo {
     pub username: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct ChangePasswordRequest {
+    pub username: String,
+    pub current_password: String,
+    pub new_password: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserInfo {
     pub name: String,

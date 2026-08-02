@@ -1,9 +1,11 @@
 # PAM service for foyer-concierge WebGUI/API logins.
 # Install as /etc/pam.d/foyer-concierge.
 # Delegates to the distro's standard stack; on hosts without
-# common-auth/common-account (e.g. plain Yocto), replace the includes with
-# pam_unix lines:
+# common-auth/common-account/common-password (e.g. plain Yocto), replace the
+# includes with pam_unix lines:
 #   auth     required pam_unix.so
 #   account  required pam_unix.so
+#   password required pam_unix.so
 auth     include common-auth
 account  include common-account
+password include common-password
