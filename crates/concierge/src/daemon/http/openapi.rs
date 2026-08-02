@@ -19,6 +19,11 @@ use super::handlers;
         handlers::get_service_config,
         handlers::update_service_config,
         handlers::list_disks,
+        handlers::tls_status,
+        handlers::tls_enable,
+        handlers::tls_disable,
+        handlers::tls_ca,
+        handlers::tls_set_ca,
     )
 )]
 struct ApiDoc;

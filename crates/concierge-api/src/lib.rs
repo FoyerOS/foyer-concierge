@@ -124,3 +124,30 @@ pub struct DiskInfo {
     pub size_bytes: u64,
     pub model: Option<String>,
 }
+
+/// Current state of HTTPS termination at haproxy.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TlsStatus {
+    pub enabled: bool,
+    /// Domain the current leaf certificate was issued for.
+    pub domain: Option<String>,
+    /// True if the CA is Foyer-generated; false if a power user imported
+    /// their own via the exit hatch (`PUT /tls/ca`).
+    pub ca_managed: bool,
+    /// RFC 3339 expiry of the root CA, if one has been generated/imported.
+    pub ca_not_after: Option<String>,
+    /// RFC 3339 expiry of the current leaf certificate, if TLS has ever been enabled.
+    pub cert_not_after: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct EnableTlsRequest {
+    pub domain: String,
+}
+
+/// Exit hatch: replace the CA concierge signs leaf certificates with.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct SetCaRequest {
+    pub ca_cert_pem: String,
+    pub ca_key_pem: String,
+}

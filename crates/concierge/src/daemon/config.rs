@@ -18,6 +18,10 @@ pub struct Config {
     pub admin_group: String,
     /// PAM service name used for login (file in /etc/pam.d/).
     pub pam_service: String,
+    /// Where the HTTPS CA and leaf certificate/state are persisted.
+    pub tls_state_dir: PathBuf,
+    /// haproxy config file concierge regenerates when TLS is toggled.
+    pub haproxy_config_path: PathBuf,
 }
 
 impl Default for Config {
@@ -27,6 +31,8 @@ impl Default for Config {
             listen: Some(([0, 0, 0, 0], 8080).into()),
             admin_group: "foyer-admin".into(),
             pam_service: "foyer-concierge".into(),
+            tls_state_dir: "/var/lib/foyer/tls".into(),
+            haproxy_config_path: "/etc/haproxy/haproxy.cfg".into(),
         }
     }
 }

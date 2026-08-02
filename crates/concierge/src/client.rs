@@ -50,6 +50,15 @@ impl Client {
             .await
     }
 
+    pub async fn post_json_body<B: Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> anyhow::Result<T> {
+        let bytes = Bytes::from(serde_json::to_vec(body).context("cannot serialize request")?);
+        self.request_json(hyper::Method::POST, path, bytes).await
+    }
+
     pub async fn put_json<B: Serialize, T: DeserializeOwned>(
         &self,
         path: &str,
@@ -57,6 +66,22 @@ impl Client {
     ) -> anyhow::Result<T> {
         let bytes = Bytes::from(serde_json::to_vec(body).context("cannot serialize request")?);
         self.request_json(hyper::Method::PUT, path, bytes).await
+    }
+
+    /// Like [`Self::get_json`], but for endpoints returning a raw body
+    /// (e.g. a PEM certificate) rather than a JSON-encoded value.
+    pub async fn get_text(&self, path: &str) -> anyhow::Result<String> {
+        let uri: hyper::Uri = Uri::new(&self.socket, path).into();
+        let response = self.http.get(uri).await.with_context(|| {
+            format!(
+                "cannot reach the concierge daemon on {} (is it running?)",
+                self.socket.display()
+            )
+        })?;
+        let status = response.status();
+        let bytes = response.into_body().collect().await?.to_bytes();
+        self.check_status(status, &bytes)?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     async fn request_json<T: DeserializeOwned>(
@@ -87,13 +112,18 @@ impl Client {
     ) -> anyhow::Result<T> {
         let status = response.status();
         let bytes = response.into_body().collect().await?.to_bytes();
-        if !status.is_success() {
-            let body: ApiErrorBody = serde_json::from_slice(&bytes).unwrap_or(ApiErrorBody {
-                code: "unknown".into(),
-                message: String::from_utf8_lossy(&bytes).into_owned(),
-            });
-            return Err(anyhow!(ApiError { status, body }));
-        }
+        self.check_status(status, &bytes)?;
         serde_json::from_slice(&bytes).context("invalid JSON from daemon")
+    }
+
+    fn check_status(&self, status: hyper::StatusCode, bytes: &Bytes) -> anyhow::Result<()> {
+        if status.is_success() {
+            return Ok(());
+        }
+        let body: ApiErrorBody = serde_json::from_slice(bytes).unwrap_or(ApiErrorBody {
+            code: "unknown".into(),
+            message: String::from_utf8_lossy(bytes).into_owned(),
+        });
+        Err(anyhow!(ApiError { status, body }))
     }
 }

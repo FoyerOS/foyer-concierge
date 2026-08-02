@@ -40,6 +40,11 @@ pub trait SystemdManager {
 
     #[zbus(name = "Reload")]
     fn reload(&self) -> zbus::Result<()>;
+
+    /// Ask a single unit to reload (its `ExecReload=`), as opposed to
+    /// `Reload` above which re-reads all unit files from disk.
+    #[zbus(name = "ReloadUnit")]
+    fn reload_unit(&self, name: &str, mode: &str) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
 }
 
 /// Proxy to a single unit object, bound dynamically to whatever path
@@ -189,6 +194,26 @@ impl UnitService for SystemdUnitService {
 
     async fn disable(&self, unit: &str) -> Result<ServiceInfo> {
         self.set_enabled(unit, false).await
+    }
+
+    async fn reload(&self, unit: &str) -> Result<ServiceInfo> {
+        let entry = managed_services::find(unit)
+            .ok_or_else(|| ServiceError::NotFound(unit.to_owned()))?;
+        let connection = self.connection()?;
+        let manager = SystemdManagerProxy::new(connection)
+            .await
+            .map_err(|error| map_dbus_error(unit, error))?;
+        manager
+            .reload_unit(unit, "replace")
+            .await
+            .map_err(|error| map_dbus_error(unit, error))?;
+
+        let mut info = self
+            .query_unit(connection, unit)
+            .await
+            .map_err(|error| map_dbus_error(unit, error))?;
+        info.config_paths = owned_config_paths(entry);
+        Ok(info)
     }
 
     async fn get_config(&self, unit: &str, path: &str) -> Result<ServiceConfigFile> {

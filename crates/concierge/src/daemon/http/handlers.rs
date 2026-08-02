@@ -1,8 +1,9 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use concierge_api::{
-    ApiErrorBody, DiskInfo, HealthResponse, HealthStatus, LoginRequest, ServiceConfigFile,
-    ServiceInfo, SessionInfo, SystemStatus, UpdateServiceConfigRequest, UserInfo,
+    ApiErrorBody, DiskInfo, EnableTlsRequest, HealthResponse, HealthStatus, LoginRequest,
+    ServiceConfigFile, ServiceInfo, SessionInfo, SetCaRequest, SystemStatus, TlsStatus,
+    UpdateServiceConfigRequest, UserInfo,
 };
 use serde::Deserialize;
 use tower_sessions::Session;
@@ -10,6 +11,7 @@ use tower_sessions::Session;
 use super::error::ApiError;
 use super::session::SESSION_USERNAME_KEY;
 use crate::daemon::auth;
+use crate::daemon::services::routes;
 use crate::daemon::state::AppState;
 
 type ApiResult<T> = Result<Json<T>, ApiError>;
@@ -105,7 +107,11 @@ pub async fn enable_service(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> ApiResult<ServiceInfo> {
-    Ok(Json(state.units.enable(&name).await?))
+    let info = state.units.enable(&name).await?;
+    if routes::is_routable(&name) {
+        state.tls.sync_routes().await?;
+    }
+    Ok(Json(info))
 }
 
 #[utoipa::path(post, path = "/api/v1/services/{name}/disable", params(
@@ -118,7 +124,11 @@ pub async fn disable_service(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> ApiResult<ServiceInfo> {
-    Ok(Json(state.units.disable(&name).await?))
+    let info = state.units.disable(&name).await?;
+    if routes::is_routable(&name) {
+        state.tls.sync_routes().await?;
+    }
+    Ok(Json(info))
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,4 +179,42 @@ pub async fn update_service_config(
 ))]
 pub async fn list_disks(State(state): State<AppState>) -> ApiResult<Vec<DiskInfo>> {
     Ok(Json(state.storage.disks().await?))
+}
+
+#[utoipa::path(get, path = "/api/v1/tls/status", responses((status = 200, body = TlsStatus)))]
+pub async fn tls_status(State(state): State<AppState>) -> ApiResult<TlsStatus> {
+    Ok(Json(state.tls.status().await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/tls/enable", request_body = EnableTlsRequest, responses(
+    (status = 200, body = TlsStatus),
+))]
+pub async fn tls_enable(
+    State(state): State<AppState>,
+    Json(request): Json<EnableTlsRequest>,
+) -> ApiResult<TlsStatus> {
+    Ok(Json(state.tls.enable(&request.domain).await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/tls/disable", responses((status = 200, body = TlsStatus)))]
+pub async fn tls_disable(State(state): State<AppState>) -> ApiResult<TlsStatus> {
+    Ok(Json(state.tls.disable().await?))
+}
+
+#[utoipa::path(get, path = "/api/v1/tls/ca", responses(
+    (status = 200, body = String),
+    (status = 404, body = ApiErrorBody),
+))]
+pub async fn tls_ca(State(state): State<AppState>) -> Result<String, ApiError> {
+    Ok(state.tls.ca_cert().await?)
+}
+
+#[utoipa::path(put, path = "/api/v1/tls/ca", request_body = SetCaRequest, responses(
+    (status = 200, body = TlsStatus),
+))]
+pub async fn tls_set_ca(
+    State(state): State<AppState>,
+    Json(request): Json<SetCaRequest>,
+) -> ApiResult<TlsStatus> {
+    Ok(Json(state.tls.set_ca(request.ca_cert_pem, request.ca_key_pem).await?))
 }

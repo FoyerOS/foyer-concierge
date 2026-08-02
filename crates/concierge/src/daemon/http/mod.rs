@@ -33,6 +33,10 @@ fn router(state: AppState) -> Router {
             get(handlers::get_service_config).put(handlers::update_service_config),
         )
         .route("/storage/disks", get(handlers::list_disks))
+        .route("/tls/status", get(handlers::tls_status))
+        .route("/tls/enable", post(handlers::tls_enable))
+        .route("/tls/disable", post(handlers::tls_disable))
+        .route("/tls/ca", get(handlers::tls_ca).put(handlers::tls_set_ca))
         .route_layer(middleware::from_fn(session::require_auth));
 
     // In-memory sessions; no TLS so secure=false.

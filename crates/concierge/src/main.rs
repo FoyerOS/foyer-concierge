@@ -43,6 +43,9 @@ enum Command {
     /// Manage storage
     #[command(subcommand)]
     Storage(cli::StorageCommand),
+    /// Manage HTTPS termination at haproxy
+    #[command(subcommand)]
+    Tls(cli::TlsCommand),
 }
 
 #[tokio::main]

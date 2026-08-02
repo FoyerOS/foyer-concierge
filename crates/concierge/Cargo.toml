@@ -40,6 +40,14 @@ sd-notify = "0.5"
 pam-client = "0.5"
 nix = { version = "0.31", features = ["user", "hostname"] }
 
+# Self-signed CA + leaf certificate generation for HTTPS mode (see
+# daemon/services/tls.rs). x509-parser is needed both by rcgen itself (to
+# rebuild an Issuer from an existing CA's PEM) and by us directly (to check
+# an imported CA's key actually matches its certificate).
+rcgen = { version = "0.14", features = ["x509-parser"] }
+x509-parser = "0.18"
+time = { version = "0.3", features = ["formatting"] }
+
 # CLI-side HTTP client over the unix socket
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }

@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use concierge_api::{
-    DiskInfo, HealthResponse, ServiceConfigFile, ServiceInfo, SystemStatus,
-    UpdateServiceConfigRequest, UserInfo,
+    DiskInfo, EnableTlsRequest, HealthResponse, ServiceConfigFile, ServiceInfo, SetCaRequest,
+    SystemStatus, TlsStatus, UpdateServiceConfigRequest, UserInfo,
 };
 
 use crate::Command;
@@ -60,6 +60,31 @@ pub enum StorageCommand {
     Disks,
 }
 
+#[derive(Subcommand)]
+pub enum TlsCommand {
+    /// Show current HTTPS status
+    Status,
+    /// Turn on HTTPS termination at haproxy for a domain, generating a CA
+    /// and leaf certificate on first use
+    Enable {
+        #[arg(long)]
+        domain: String,
+    },
+    /// Turn HTTPS termination back off; haproxy reverts to plain HTTP
+    Disable,
+    /// Print the root CA certificate (PEM) users should trust
+    Ca,
+    /// Exit hatch: replace the CA concierge signs leaf certificates with
+    SetCa {
+        /// PEM file containing the CA certificate
+        #[arg(long)]
+        cert: PathBuf,
+        /// PEM file containing the CA private key
+        #[arg(long)]
+        key: PathBuf,
+    },
+}
+
 pub async fn run(socket: &Path, command: Command) -> anyhow::Result<()> {
     let client = Client::new(socket);
     let result = match command {
@@ -79,6 +104,11 @@ pub async fn run(socket: &Path, command: Command) -> anyhow::Result<()> {
             config_set(&client, &name, path.as_deref(), file.as_deref()).await
         }
         Command::Storage(StorageCommand::Disks) => storage_disks(&client).await,
+        Command::Tls(TlsCommand::Status) => tls_status(&client).await,
+        Command::Tls(TlsCommand::Enable { domain }) => tls_enable(&client, &domain).await,
+        Command::Tls(TlsCommand::Disable) => tls_disable(&client).await,
+        Command::Tls(TlsCommand::Ca) => tls_ca(&client).await,
+        Command::Tls(TlsCommand::SetCa { cert, key }) => tls_set_ca(&client, &cert, &key).await,
     };
 
     // Not-yet-implemented server features get a clean message, not a backtrace.
@@ -242,6 +272,49 @@ async fn storage_disks(client: &Client) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+async fn tls_status(client: &Client) -> anyhow::Result<()> {
+    print_tls_status(&client.get_json("/api/v1/tls/status").await?);
+    Ok(())
+}
+
+async fn tls_enable(client: &Client, domain: &str) -> anyhow::Result<()> {
+    let status: TlsStatus = client
+        .post_json_body("/api/v1/tls/enable", &EnableTlsRequest { domain: domain.to_owned() })
+        .await?;
+    print_tls_status(&status);
+    Ok(())
+}
+
+async fn tls_disable(client: &Client) -> anyhow::Result<()> {
+    let status: TlsStatus = client.post_json("/api/v1/tls/disable").await?;
+    print_tls_status(&status);
+    Ok(())
+}
+
+async fn tls_ca(client: &Client) -> anyhow::Result<()> {
+    let pem = client.get_text("/api/v1/tls/ca").await?;
+    print!("{pem}");
+    Ok(())
+}
+
+async fn tls_set_ca(client: &Client, cert: &Path, key: &Path) -> anyhow::Result<()> {
+    let request = SetCaRequest {
+        ca_cert_pem: std::fs::read_to_string(cert)?,
+        ca_key_pem: std::fs::read_to_string(key)?,
+    };
+    let status: TlsStatus = client.put_json("/api/v1/tls/ca", &request).await?;
+    print_tls_status(&status);
+    Ok(())
+}
+
+fn print_tls_status(status: &TlsStatus) {
+    println!("enabled     : {}", status.enabled);
+    println!("domain      : {}", status.domain.as_deref().unwrap_or("-"));
+    println!("ca          : {}", if status.ca_managed { "foyer-managed" } else { "imported" });
+    println!("ca expires  : {}", status.ca_not_after.as_deref().unwrap_or("-"));
+    println!("cert expires: {}", status.cert_not_after.as_deref().unwrap_or("-"));
 }
 
 fn format_duration(secs: u64) -> String {

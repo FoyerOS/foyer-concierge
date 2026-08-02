@@ -3,9 +3,10 @@ use std::sync::Arc;
 use super::config::Config;
 use super::services::storage::UdisksStorageService;
 use super::services::system::ProcSystemService;
+use super::services::tls::FoyerTlsService;
 use super::services::units::SystemdUnitService;
 use super::services::users::SystemUserService;
-use super::services::{StorageService, SystemService, UnitService, UserService};
+use super::services::{StorageService, SystemService, TlsService, UnitService, UserService};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -14,6 +15,7 @@ pub struct AppState {
     pub users: Arc<dyn UserService>,
     pub units: Arc<dyn UnitService>,
     pub storage: Arc<dyn StorageService>,
+    pub tls: Arc<dyn TlsService>,
 }
 
 impl AppState {
@@ -27,12 +29,19 @@ impl AppState {
             }
         };
 
+        let units: Arc<dyn UnitService> = Arc::new(SystemdUnitService::new(dbus.clone()));
+
         Self {
-            config: Arc::new(config),
-            system: Arc::new(ProcSystemService::new(dbus.clone())),
+            system: Arc::new(ProcSystemService::new(dbus)),
             users: Arc::new(SystemUserService),
-            units: Arc::new(SystemdUnitService::new(dbus)),
+            tls: Arc::new(FoyerTlsService::new(
+                config.tls_state_dir.clone(),
+                config.haproxy_config_path.clone(),
+                units.clone(),
+            )),
+            units,
             storage: Arc::new(UdisksStorageService),
+            config: Arc::new(config),
         }
     }
 }
