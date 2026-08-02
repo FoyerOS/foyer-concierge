@@ -123,13 +123,17 @@ fn pam_change_password(
     })
 }
 
-/// Answers a PAM `chauthtok()` conversation with two known passwords:
-/// prompts mentioning "current"/"old" get the current password, everything
-/// else (the "New password"/"Retype new password" prompts pam_unix and
-/// pam_cracklib issue) gets the new password.
+/// Answers a PAM conversation spanning both `authenticate()` and
+/// `chauthtok()` with two known passwords: prompts mentioning "new" (the
+/// "New password"/"Retype new password" prompts pam_unix and pam_cracklib
+/// issue) get the new password, everything else — including plain
+/// `authenticate()`'s generic "Password:" prompt and chauthtok's
+/// "(current) UNIX password:" prompt — gets the current password.
 ///
-/// `conv_mock::Conversation` (used for plain `authenticate()` above) can't be
-/// reused here since it always echoes back a single fixed password.
+/// `conv_mock::Conversation` (used for plain `authenticate()` in `login`
+/// above) can't be reused here since it always echoes back a single fixed
+/// password, and this handler needs to serve both the current and new
+/// password depending on which phase of the conversation is asking.
 struct ChangePasswordConversation {
     current_password: String,
     new_password: String,
@@ -142,10 +146,10 @@ impl ConversationHandler for ChangePasswordConversation {
 
     fn prompt_echo_off(&mut self, prompt: &CStr) -> Result<CString, ErrorCode> {
         let prompt = prompt.to_string_lossy().to_lowercase();
-        let answer = if prompt.contains("current") || prompt.contains("old") {
-            &self.current_password
-        } else {
+        let answer = if prompt.contains("new") {
             &self.new_password
+        } else {
+            &self.current_password
         };
         CString::new(answer.as_str()).map_err(|_| ErrorCode::CONV_ERR)
     }
