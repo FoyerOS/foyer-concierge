@@ -75,6 +75,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
+  changePassword: (username: string, currentPassword: string, newPassword: string) =>
+    request<SessionInfo>("/api/v1/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({
+        username,
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    }),
   logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),
   session: () => request<SessionInfo>("/api/v1/auth/session"),
   systemStatus: () => request<SystemStatus>("/api/v1/system/status"),

@@ -34,6 +34,7 @@ function Login({ onLogin }: { onLogin: (session: SessionInfo) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [needsPasswordChange, setNeedsPasswordChange] = useState(false);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -42,11 +43,26 @@ function Login({ onLogin }: { onLogin: (session: SessionInfo) => void }) {
     try {
       onLogin(await api.login(username, password));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "cannot reach daemon");
+      if (err instanceof ApiError && err.body.code === "password_change_required") {
+        setNeedsPasswordChange(true);
+      } else {
+        setError(err instanceof ApiError ? err.message : "cannot reach daemon");
+      }
     } finally {
       setBusy(false);
     }
   };
+
+  if (needsPasswordChange) {
+    return (
+      <ChangePasswordForm
+        username={username}
+        currentPassword={password}
+        onLogin={onLogin}
+        onCancel={() => setNeedsPasswordChange(false)}
+      />
+    );
+  }
 
   return (
     <main className="card">
@@ -73,6 +89,76 @@ function Login({ onLogin }: { onLogin: (session: SessionInfo) => void }) {
         </label>
         <button type="submit" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
+        </button>
+        {error && <p className="error">{error}</p>}
+      </form>
+    </main>
+  );
+}
+
+function ChangePasswordForm({
+  username,
+  currentPassword,
+  onLogin,
+  onCancel,
+}: {
+  username: string;
+  currentPassword: string;
+  onLogin: (session: SessionInfo) => void;
+  onCancel: () => void;
+}) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    if (newPassword !== confirmPassword) {
+      setError("new passwords do not match");
+      return;
+    }
+    setBusy(true);
+    try {
+      onLogin(await api.changePassword(username, currentPassword, newPassword));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "cannot reach daemon");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="card">
+      <h1>Foyer Concierge</h1>
+      <p>This account still has its default password. Choose a new one to continue.</p>
+      <form onSubmit={submit}>
+        <label>
+          New password
+          <input
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            autoComplete="new-password"
+            required
+          />
+        </label>
+        <label>
+          Confirm new password
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+            required
+          />
+        </label>
+        <button type="submit" disabled={busy}>
+          {busy ? "Updating…" : "Set new password"}
+        </button>
+        <button type="button" onClick={onCancel} disabled={busy}>
+          Back to sign in
         </button>
         {error && <p className="error">{error}</p>}
       </form>

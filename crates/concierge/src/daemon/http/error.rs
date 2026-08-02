@@ -11,6 +11,7 @@ pub enum ApiError {
     Unauthorized(&'static str),
     Forbidden,
     PasswordChangeRequired,
+    PasswordRejected(String),
     Unimplemented,
     NotFound(String),
     Conflict(String),
@@ -33,6 +34,9 @@ impl IntoResponse for ApiError {
                 "password_change_required",
                 "password change required before login".to_owned(),
             ),
+            Self::PasswordRejected(message) => {
+                (StatusCode::BAD_REQUEST, "password_rejected", message)
+            }
             Self::Unimplemented => (
                 StatusCode::NOT_IMPLEMENTED,
                 "unimplemented",
@@ -74,6 +78,7 @@ impl From<AuthError> for ApiError {
             AuthError::InvalidCredentials => Self::Unauthorized("invalid username or password"),
             AuthError::NotAuthorized => Self::Forbidden,
             AuthError::PasswordChangeRequired => Self::PasswordChangeRequired,
+            AuthError::PasswordRejected(message) => Self::PasswordRejected(message),
             AuthError::Internal(error) => Self::Internal(error),
         }
     }

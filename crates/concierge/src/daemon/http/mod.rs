@@ -18,7 +18,8 @@ use super::state::AppState;
 fn router(state: AppState) -> Router {
     let public = Router::new()
         .route("/health", get(handlers::health))
-        .route("/auth/login", post(handlers::login));
+        .route("/auth/login", post(handlers::login))
+        .route("/auth/change-password", post(handlers::change_password));
 
     let protected = Router::new()
         .route("/auth/logout", post(handlers::logout))
