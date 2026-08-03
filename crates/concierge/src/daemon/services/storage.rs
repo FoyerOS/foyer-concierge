@@ -382,7 +382,13 @@ fn whole_disk_of_partition(part_kname: &str) -> Option<String> {
 /// has no such gap -- it doesn't go through `/dev` in the first place.
 fn mounted_device_kname(mount_point: &str) -> Option<String> {
     let raw = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
-    let dev_num = raw.lines().find_map(|line| {
+    let dev_num = parse_mountinfo_devnum(&raw, mount_point)?;
+    let link = std::fs::read_link(format!("/sys/dev/block/{dev_num}")).ok()?;
+    link.file_name()?.to_str().map(str::to_owned)
+}
+
+fn parse_mountinfo_devnum(mountinfo: &str, mount_point: &str) -> Option<String> {
+    mountinfo.lines().find_map(|line| {
         let mut fields = line.split_whitespace();
         fields.next()?; // mount ID
         fields.next()?; // parent ID
@@ -390,9 +396,43 @@ fn mounted_device_kname(mount_point: &str) -> Option<String> {
         fields.next()?; // root
         let mp = fields.next()?;
         (mp == mount_point).then(|| dev_num.to_owned())
-    })?;
-    let link = std::fs::read_link(format!("/sys/dev/block/{dev_num}")).ok()?;
-    link.file_name()?.to_str().map(str::to_owned)
+    })
+}
+
+/// The kernel device name backing `mount_point`, read from
+/// `/proc/self/mountinfo`'s mount-source field (the token right after the
+/// `- <fstype>` separator) instead of the major:minor field
+/// `mounted_device_kname` uses. Needed specifically for a btrfs mount:
+/// verified on a real boot that btrfs reports an anonymous internal device
+/// number in the major:minor field, not any real member device's -- there
+/// is no single "the device" for a filesystem that can span several. The
+/// mount-source field is the one place the actual member path used at
+/// mount time still shows up. Not used for the *root* filesystem lookup:
+/// that field is what broke there instead (the kernel's synthetic
+/// "/dev/root" placeholder on a non-initramfs boot has no real backing
+/// path at all), which is why that lookup goes through major:minor.
+fn mounted_source_kname(mount_point: &str) -> Option<String> {
+    let raw = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
+    let source = parse_mountinfo_source(&raw, mount_point)?;
+    Path::new(&source).file_name()?.to_str().map(str::to_owned)
+}
+
+fn parse_mountinfo_source(mountinfo: &str, mount_point: &str) -> Option<String> {
+    mountinfo.lines().find_map(|line| {
+        let (fields, rest) = line.split_once(" - ")?;
+        let mut fields = fields.split_whitespace();
+        fields.next()?; // mount ID
+        fields.next()?; // parent ID
+        fields.next()?; // major:minor
+        fields.next()?; // root
+        let mp = fields.next()?;
+        if mp != mount_point {
+            return None;
+        }
+        let mut rest_fields = rest.split_whitespace();
+        rest_fields.next()?; // fstype
+        rest_fields.next().map(str::to_owned)
+    })
 }
 
 fn read_u64(path: &Path) -> Option<u64> {
@@ -414,11 +454,12 @@ fn read_trimmed(path: &Path) -> Option<String> {
 /// Resolve which mounted btrfs filesystem backs `mount_point`, by finding
 /// the fsid whose `devices/` directory (see the module doc for why this
 /// directory alone can't give a devid-to-path map) contains the kernel
-/// device name backing the mount. Sysfs-only, no command execution, and
-/// correctly scoped even with other btrfs filesystems mounted elsewhere on
-/// the host (as on a dev machine, unlike the single-purpose appliance).
+/// device name backing the mount. procfs plus sysfs only, no command
+/// execution, and correctly scoped even with other btrfs filesystems
+/// mounted elsewhere on the host (as on a dev machine, unlike the
+/// single-purpose appliance).
 fn resolve_fsid(mount_point: &Path) -> Option<String> {
-    let kname = mounted_device_kname(mount_point.to_str()?)?;
+    let kname = mounted_source_kname(mount_point.to_str()?)?;
 
     for entry in std::fs::read_dir("/sys/fs/btrfs").ok()?.flatten() {
         let fsid = entry.file_name().to_string_lossy().into_owned();
@@ -562,6 +603,40 @@ fn io_err(error: std::io::Error) -> ServiceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Real lines captured from `/proc/self/mountinfo` on a booted Foyer
+    // image, root= via grub with no initramfs.
+    const MOUNTINFO: &str = "\
+25 20 0:22 / /efi rw,relatime shared:14 - vfat /dev/sda1 rw,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,errors=remount-ro\n\
+20 1 8:2 / / ro,relatime shared:1 - ext4 /dev/root ro\n\
+180 20 0:59 / /data rw,noatime shared:216 - btrfs /dev/sda7 rw,compress=zstd:1,discard=async,space_cache=v2,subvolid=5,subvol=/\n";
+
+    #[test]
+    fn parse_mountinfo_devnum_finds_the_requested_mount_point() {
+        assert_eq!(parse_mountinfo_devnum(MOUNTINFO, "/").as_deref(), Some("8:2"));
+        assert_eq!(parse_mountinfo_devnum(MOUNTINFO, "/efi").as_deref(), Some("0:22"));
+    }
+
+    #[test]
+    fn parse_mountinfo_devnum_missing_mount_point() {
+        assert_eq!(parse_mountinfo_devnum(MOUNTINFO, "/nope"), None);
+    }
+
+    #[test]
+    fn parse_mountinfo_source_reads_the_real_member_path_for_btrfs() {
+        // The whole point of this parser: /data's major:minor (0:59 above)
+        // is btrfs's anonymous internal device number, not a real one --
+        // the source field is what still names the actual member device.
+        assert_eq!(parse_mountinfo_source(MOUNTINFO, "/data").as_deref(), Some("/dev/sda7"));
+    }
+
+    #[test]
+    fn parse_mountinfo_source_root_is_the_unusable_placeholder() {
+        // Documents why root disk resolution can't use this parser: the
+        // source field for / is the kernel's synthetic "/dev/root", which
+        // has no backing /dev node on a non-initramfs boot.
+        assert_eq!(parse_mountinfo_source(MOUNTINFO, "/").as_deref(), Some("/dev/root"));
+    }
 
     #[test]
     fn classify_disk_boot_disk_is_system_even_if_also_a_pool_member() {
