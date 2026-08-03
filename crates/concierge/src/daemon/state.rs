@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::config::Config;
-use super::services::storage::UdisksStorageService;
+use super::services::storage::BtrfsStorageService;
 use super::services::system::ProcSystemService;
 use super::services::tls::FoyerTlsService;
 use super::services::units::SystemdUnitService;
@@ -40,7 +40,10 @@ impl AppState {
                 units.clone(),
             )),
             units,
-            storage: Arc::new(UdisksStorageService),
+            storage: Arc::new(BtrfsStorageService::new(
+                config.data_mount_point.clone(),
+                config.btrfs_bin.clone(),
+            )),
             config: Arc::new(config),
         }
     }

@@ -8,7 +8,10 @@ Type=notify
 ExecStart=/usr/bin/concierge daemon
 Restart=on-failure
 RestartSec=2
-# Needs root: PAM auth, user management, systemd + storage control.
+# Needs root: PAM auth, user management, systemd + storage control -- the
+# latter now includes raw block-device access (StorageService shells out to
+# btrfs device add/remove/resize against caller-supplied disks), so that's
+# what breaks first if ProtectSystem=/DevicePolicy= sandboxing is added.
 # Tighten with systemd sandboxing options as features land.
 RuntimeDirectory=foyer
 RuntimeDirectoryMode=0755

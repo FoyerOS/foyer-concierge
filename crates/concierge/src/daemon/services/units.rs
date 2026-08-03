@@ -248,7 +248,9 @@ impl UnitService for SystemdUnitService {
 
         let current = std::fs::read_to_string(path).map_err(|error| ServiceError::Other(error.into()))?;
         if etag_for(&current) != etag {
-            return Err(ServiceError::Conflict(config_path.to_owned()));
+            return Err(ServiceError::Conflict(format!(
+                "{config_path} changed concurrently, try again"
+            )));
         }
 
         let parent = path.parent().unwrap_or(std::path::Path::new("/"));

@@ -22,6 +22,10 @@ pub struct Config {
     pub tls_state_dir: PathBuf,
     /// haproxy config file concierge regenerates when TLS is toggled.
     pub haproxy_config_path: PathBuf,
+    /// Where the `/data` btrfs pool is mounted.
+    pub data_mount_point: PathBuf,
+    /// `btrfs(8)` binary storage operations shell out to.
+    pub btrfs_bin: PathBuf,
 }
 
 impl Default for Config {
@@ -33,6 +37,9 @@ impl Default for Config {
             pam_service: "foyer-concierge".into(),
             tls_state_dir: "/var/lib/foyer/tls".into(),
             haproxy_config_path: "/etc/haproxy/haproxy.cfg".into(),
+            data_mount_point: "/data".into(),
+            // The oe-core btrfs-tools recipe installs to /usr/bin, not /usr/sbin.
+            btrfs_bin: "/usr/bin/btrfs".into(),
         }
     }
 }

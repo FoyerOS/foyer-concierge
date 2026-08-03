@@ -1,9 +1,10 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use concierge_api::{
-    ApiErrorBody, ChangePasswordRequest, DiskInfo, EnableTlsRequest, HealthResponse, HealthStatus,
-    LoginRequest, ServiceConfigFile, ServiceInfo, SessionInfo, SetCaRequest, SystemStatus,
-    TlsStatus, UpdateServiceConfigRequest, UserInfo,
+    AddDiskRequest, ApiErrorBody, ChangePasswordRequest, DiskInfo, EnableTlsRequest,
+    HealthResponse, HealthStatus, LoginRequest, PoolStatus, RemoveDiskRequest, ServiceConfigFile,
+    ServiceInfo, SessionInfo, SetCaRequest, SystemStatus, TlsStatus, UpdateServiceConfigRequest,
+    UserInfo,
 };
 use serde::Deserialize;
 use tower_sessions::Session;
@@ -207,6 +208,44 @@ pub async fn update_service_config(
 ))]
 pub async fn list_disks(State(state): State<AppState>) -> ApiResult<Vec<DiskInfo>> {
     Ok(Json(state.storage.disks().await?))
+}
+
+#[utoipa::path(get, path = "/api/v1/storage/pool", responses(
+    (status = 200, body = PoolStatus),
+))]
+pub async fn pool_status(State(state): State<AppState>) -> ApiResult<PoolStatus> {
+    Ok(Json(state.storage.pool().await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/storage/pool/devices", request_body = AddDiskRequest, responses(
+    (status = 200, body = PoolStatus),
+    (status = 404, body = ApiErrorBody),
+    (status = 409, body = ApiErrorBody),
+))]
+pub async fn pool_add(
+    State(state): State<AppState>,
+    Json(request): Json<AddDiskRequest>,
+) -> ApiResult<PoolStatus> {
+    Ok(Json(state.storage.add_disk(&request.device, request.wipe).await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/storage/pool/devices/remove", request_body = RemoveDiskRequest, responses(
+    (status = 200, body = PoolStatus),
+    (status = 404, body = ApiErrorBody),
+    (status = 409, body = ApiErrorBody),
+))]
+pub async fn pool_remove(
+    State(state): State<AppState>,
+    Json(request): Json<RemoveDiskRequest>,
+) -> ApiResult<PoolStatus> {
+    Ok(Json(state.storage.remove_disk(&request.device).await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/storage/pool/grow", responses(
+    (status = 200, body = PoolStatus),
+))]
+pub async fn pool_grow(State(state): State<AppState>) -> ApiResult<PoolStatus> {
+    Ok(Json(state.storage.grow().await?))
 }
 
 #[utoipa::path(get, path = "/api/v1/tls/status", responses((status = 200, body = TlsStatus)))]

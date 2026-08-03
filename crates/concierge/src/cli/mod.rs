@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use concierge_api::{
-    DiskInfo, EnableTlsRequest, HealthResponse, ServiceConfigFile, ServiceInfo, SetCaRequest,
-    SystemStatus, TlsStatus, UpdateServiceConfigRequest, UserInfo,
+    AddDiskRequest, DiskInfo, EnableTlsRequest, HealthResponse, PoolOperationState, PoolStatus,
+    RemoveDiskRequest, ServiceConfigFile, ServiceInfo, SetCaRequest, SystemStatus, TlsStatus,
+    UpdateServiceConfigRequest, UserInfo,
 };
 
 use crate::Command;
@@ -56,8 +57,29 @@ pub enum ConfigCommand {
 
 #[derive(Subcommand)]
 pub enum StorageCommand {
-    /// List disks
+    /// List disks, with their pool eligibility
     Disks,
+    /// Show the /data pool's status
+    Pool,
+    /// Add a disk to the pool
+    Add {
+        device: String,
+        /// Force-add a disk that already holds a partition table or filesystem
+        #[arg(long)]
+        wipe: bool,
+        /// Return immediately instead of polling until the add finishes
+        #[arg(long)]
+        no_wait: bool,
+    },
+    /// Evacuate a disk and remove it from the pool
+    Remove {
+        device: String,
+        /// Return immediately instead of polling until the removal finishes
+        #[arg(long)]
+        no_wait: bool,
+    },
+    /// Resize every pool member to fill its underlying block device
+    Grow,
 }
 
 #[derive(Subcommand)]
@@ -104,6 +126,14 @@ pub async fn run(socket: &Path, command: Command) -> anyhow::Result<()> {
             config_set(&client, &name, path.as_deref(), file.as_deref()).await
         }
         Command::Storage(StorageCommand::Disks) => storage_disks(&client).await,
+        Command::Storage(StorageCommand::Pool) => storage_pool(&client).await,
+        Command::Storage(StorageCommand::Add { device, wipe, no_wait }) => {
+            storage_add(&client, &device, wipe, no_wait).await
+        }
+        Command::Storage(StorageCommand::Remove { device, no_wait }) => {
+            storage_remove(&client, &device, no_wait).await
+        }
+        Command::Storage(StorageCommand::Grow) => storage_grow(&client).await,
         Command::Tls(TlsCommand::Status) => tls_status(&client).await,
         Command::Tls(TlsCommand::Enable { domain }) => tls_enable(&client, &domain).await,
         Command::Tls(TlsCommand::Disable) => tls_disable(&client).await,
@@ -121,7 +151,7 @@ pub async fn run(socket: &Path, command: Command) -> anyhow::Result<()> {
                 std::process::exit(1);
             }
             "conflict" => {
-                eprintln!("config changed concurrently, try again");
+                eprintln!("{}", api_error.body.message);
                 std::process::exit(1);
             }
             _ => {}
@@ -261,17 +291,91 @@ async fn config_set(
     Ok(())
 }
 
+const GIB: u64 = 1024 * 1024 * 1024;
+
 async fn storage_disks(client: &Client) -> anyhow::Result<()> {
     let disks: Vec<DiskInfo> = client.get_json("/api/v1/storage/disks").await?;
     for disk in disks {
         println!(
-            "{}\t{} GiB\t{}",
-            disk.device,
-            disk.size_bytes / (1024 * 1024 * 1024),
+            "{}\t{:>11}\t{:<12}{} GiB\t{}",
+            disk.path,
+            format!("{:?}", disk.role),
+            disk.transport,
+            disk.size_bytes / GIB,
             disk.model.as_deref().unwrap_or("-")
         );
     }
     Ok(())
+}
+
+async fn storage_pool(client: &Client) -> anyhow::Result<()> {
+    let pool: PoolStatus = client.get_json("/api/v1/storage/pool").await?;
+    print_pool_status(&pool);
+    Ok(())
+}
+
+async fn storage_add(client: &Client, device: &str, wipe: bool, no_wait: bool) -> anyhow::Result<()> {
+    let pool: PoolStatus = client
+        .post_json_body(
+            "/api/v1/storage/pool/devices",
+            &AddDiskRequest { device: device.to_owned(), wipe },
+        )
+        .await?;
+    let pool = if no_wait { pool } else { wait_for_operation(client).await? };
+    print_pool_status(&pool);
+    Ok(())
+}
+
+async fn storage_remove(client: &Client, device: &str, no_wait: bool) -> anyhow::Result<()> {
+    let pool: PoolStatus = client
+        .post_json_body(
+            "/api/v1/storage/pool/devices/remove",
+            &RemoveDiskRequest { device: device.to_owned() },
+        )
+        .await?;
+    let pool = if no_wait { pool } else { wait_for_operation(client).await? };
+    print_pool_status(&pool);
+    Ok(())
+}
+
+async fn storage_grow(client: &Client) -> anyhow::Result<()> {
+    let pool: PoolStatus = client.post_json("/api/v1/storage/pool/grow").await?;
+    print_pool_status(&pool);
+    Ok(())
+}
+
+/// Poll `GET /storage/pool` until the operation `add`/`remove` just started
+/// leaves `Running`, printing progress as it goes.
+async fn wait_for_operation(client: &Client) -> anyhow::Result<PoolStatus> {
+    loop {
+        let pool: PoolStatus = client.get_json("/api/v1/storage/pool").await?;
+        match &pool.operation {
+            Some(op) if op.state == PoolOperationState::Running => {
+                println!("{:?} {} still running...", op.kind, op.device);
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            _ => return Ok(pool),
+        }
+    }
+}
+
+fn print_pool_status(pool: &PoolStatus) {
+    println!("mount     : {}", pool.mount_point);
+    println!("uuid      : {}", pool.uuid);
+    println!(
+        "capacity  : {} GiB used / {} GiB total ({} GiB free)",
+        pool.used_bytes / GIB,
+        pool.total_bytes / GIB,
+        pool.free_bytes / GIB
+    );
+    println!("degraded  : {}", pool.degraded);
+    for device in &pool.devices {
+        let missing = if device.missing { " (MISSING)" } else { "" };
+        println!("  devid {}\t{}\t{} GiB{}", device.devid, device.path, device.size_bytes / GIB, missing);
+    }
+    if let Some(op) = &pool.operation {
+        println!("operation : {:?} {} -> {:?}", op.kind, op.device, op.state);
+    }
 }
 
 async fn tls_status(client: &Client) -> anyhow::Result<()> {

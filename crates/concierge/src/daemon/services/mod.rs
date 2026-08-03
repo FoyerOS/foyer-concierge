@@ -11,7 +11,9 @@ pub mod units;
 pub mod users;
 
 use async_trait::async_trait;
-use concierge_api::{DiskInfo, ServiceConfigFile, ServiceInfo, SystemStatus, TlsStatus, UserInfo};
+use concierge_api::{
+    DiskInfo, PoolStatus, ServiceConfigFile, ServiceInfo, SystemStatus, TlsStatus, UserInfo,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
@@ -55,9 +57,25 @@ pub trait UnitService: Send + Sync {
     ) -> Result<ServiceConfigFile>;
 }
 
+/// The `/data` btrfs pool: which disks are eligible to join it and its
+/// current membership/capacity.
 #[async_trait]
 pub trait StorageService: Send + Sync {
     async fn disks(&self) -> Result<Vec<DiskInfo>>;
+    async fn pool(&self) -> Result<PoolStatus>;
+    /// Add `device` to the pool. Re-validates `device` against a fresh
+    /// `disks()` enumeration rather than trusting the caller's string
+    /// directly (see `managed_services.rs` for the same discipline applied
+    /// to config paths). `wipe` forces a disk that already holds data;
+    /// never overrides the system disk.
+    async fn add_disk(&self, device: &str, wipe: bool) -> Result<PoolStatus>;
+    /// Evacuate `device` and drop it from the pool. Can take minutes;
+    /// returns immediately with `PoolStatus.operation` set to `Running`.
+    async fn remove_disk(&self, device: &str) -> Result<PoolStatus>;
+    /// Resize every member device to fill its underlying block device.
+    /// The on-demand equivalent of what `foyer-data-resize.service` does at
+    /// boot, for a disk that was hot-resized in a hypervisor.
+    async fn grow(&self) -> Result<PoolStatus>;
 }
 
 /// HTTPS termination at haproxy: a self-signed CA concierge owns, a leaf

@@ -125,11 +125,101 @@ pub struct UpdateServiceConfigRequest {
     pub etag: String,
 }
 
+/// A block device as seen from sysfs, with a role telling the caller whether
+/// it is safe to add to the `/data` pool.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DiskInfo {
-    pub device: String,
+    /// e.g. "/dev/sdb".
+    pub path: String,
+    /// Kernel device name, e.g. "sdb".
+    pub kname: String,
     pub size_bytes: u64,
     pub model: Option<String>,
+    pub serial: Option<String>,
+    /// Inferred from the kname/subsystem link: "nvme", "ata", "usb", "mmc", or "unknown".
+    pub transport: String,
+    pub rotational: bool,
+    pub removable: bool,
+    pub role: DiskRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskRole {
+    /// Carries the ESP or the `foyer-data` partition; never addable to the pool.
+    System,
+    /// Already a member of the `/data` btrfs pool.
+    PoolMember,
+    /// No partition table, filesystem signature or mounted partition; safe to add.
+    Available,
+    /// Has a partition table, a filesystem signature or a mounted partition,
+    /// but is neither the system disk nor a pool member.
+    InUse,
+}
+
+/// Status of the `/data` btrfs pool.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PoolStatus {
+    /// btrfs filesystem UUID.
+    pub uuid: String,
+    pub mount_point: String,
+    pub total_bytes: u64,
+    pub used_bytes: u64,
+    pub free_bytes: u64,
+    pub devices: Vec<PoolDevice>,
+    /// True if any member device is missing.
+    pub degraded: bool,
+    /// The add/remove operation currently running, if any.
+    pub operation: Option<PoolOperation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PoolDevice {
+    pub devid: u64,
+    pub path: String,
+    pub size_bytes: u64,
+    pub used_bytes: u64,
+    pub missing: bool,
+}
+
+/// A long-running pool mutation (`btrfs device add`/`remove`), tracked so
+/// `PoolStatus` can report progress instead of blocking the request.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PoolOperation {
+    pub kind: PoolOperationKind,
+    /// Device path the operation was started with.
+    pub device: String,
+    /// RFC 3339 timestamp.
+    pub started_at: String,
+    pub state: PoolOperationState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolOperationKind {
+    AddDevice,
+    RemoveDevice,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolOperationState {
+    Running,
+    Succeeded,
+    Failed { message: String },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct AddDiskRequest {
+    pub device: String,
+    /// Force-add a disk that isn't `Available` (e.g. carries a stale
+    /// filesystem signature). Never overrides `DiskRole::System`.
+    pub wipe: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct RemoveDiskRequest {
+    pub device: String,
 }
 
 /// Current state of HTTPS termination at haproxy.

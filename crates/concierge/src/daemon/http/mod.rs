@@ -34,6 +34,10 @@ fn router(state: AppState) -> Router {
             get(handlers::get_service_config).put(handlers::update_service_config),
         )
         .route("/storage/disks", get(handlers::list_disks))
+        .route("/storage/pool", get(handlers::pool_status))
+        .route("/storage/pool/devices", post(handlers::pool_add))
+        .route("/storage/pool/devices/remove", post(handlers::pool_remove))
+        .route("/storage/pool/grow", post(handlers::pool_grow))
         .route("/tls/status", get(handlers::tls_status))
         .route("/tls/enable", post(handlers::tls_enable))
         .route("/tls/disable", post(handlers::tls_disable))
