@@ -352,9 +352,7 @@ fn infer_transport(kname: &str, dev_dir: &Path) -> String {
 /// off a disk that doesn't also carry the ESP and the original
 /// `foyer-data` partition.
 fn whole_disk_of_root() -> Option<String> {
-    let device = mount_source("/proc/mounts", "/")?;
-    let real = std::fs::canonicalize(&device).ok()?;
-    let kname = real.file_name()?.to_str()?.to_owned();
+    let kname = mounted_device_kname("/")?;
     if Path::new("/sys/class/block").join(&kname).join("partition").exists() {
         whole_disk_of_partition(&kname)
     } else {
@@ -374,14 +372,27 @@ fn whole_disk_of_partition(part_kname: &str) -> Option<String> {
     Some(parent.as_os_str().to_str()?.to_owned())
 }
 
-fn mount_source(mounts_path: &str, mount_point: &str) -> Option<String> {
-    let raw = std::fs::read_to_string(mounts_path).ok()?;
-    raw.lines().find_map(|line| {
+/// The kernel device name backing whatever is mounted at `mount_point`
+/// (e.g. "sda7"), resolved via `/proc/self/mountinfo`'s major:minor field
+/// and `/sys/dev/block/<major>:<minor>` -- not `/proc/mounts`'s device
+/// column plus `canonicalize`, because on a non-initramfs boot the kernel
+/// reports the root filesystem's source as the synthetic path `/dev/root`,
+/// which has no backing node under `/dev` at all (verified: `readlink -f
+/// /dev/root` errors ENOENT on a real Foyer boot). Major:minor plus sysfs
+/// has no such gap -- it doesn't go through `/dev` in the first place.
+fn mounted_device_kname(mount_point: &str) -> Option<String> {
+    let raw = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
+    let dev_num = raw.lines().find_map(|line| {
         let mut fields = line.split_whitespace();
-        let device = fields.next()?;
+        fields.next()?; // mount ID
+        fields.next()?; // parent ID
+        let dev_num = fields.next()?; // "major:minor"
+        fields.next()?; // root
         let mp = fields.next()?;
-        (mp == mount_point).then(|| device.to_owned())
-    })
+        (mp == mount_point).then(|| dev_num.to_owned())
+    })?;
+    let link = std::fs::read_link(format!("/sys/dev/block/{dev_num}")).ok()?;
+    link.file_name()?.to_str().map(str::to_owned)
 }
 
 fn read_u64(path: &Path) -> Option<u64> {
@@ -407,10 +418,7 @@ fn read_trimmed(path: &Path) -> Option<String> {
 /// correctly scoped even with other btrfs filesystems mounted elsewhere on
 /// the host (as on a dev machine, unlike the single-purpose appliance).
 fn resolve_fsid(mount_point: &Path) -> Option<String> {
-    let mount_point = mount_point.to_str()?;
-    let device = mount_source("/proc/mounts", mount_point)?;
-    let real = std::fs::canonicalize(&device).ok()?;
-    let kname = real.file_name()?.to_str()?.to_owned();
+    let kname = mounted_device_kname(mount_point.to_str()?)?;
 
     for entry in std::fs::read_dir("/sys/fs/btrfs").ok()?.flatten() {
         let fsid = entry.file_name().to_string_lossy().into_owned();
